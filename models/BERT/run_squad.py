@@ -472,10 +472,10 @@ def get_answers(examples, features, results, args):
                 preds,
                 key=lambda x: (x.start_logit + x.end_logit),
                 reverse=True)[:args.n_best_size]
-        
+
         # In very rare edge cases we could only have single null prediction.
 	      # So we just create a nonce prediction in this case to avoid failure.
-        if not nbest:                                                    
+        if not nbest:
 	          nbest.append(Prediction(text="empty", start_logit=0.0, end_logit=0.0))
 
         total_scores = []
@@ -523,7 +523,7 @@ def get_answer_text(example, feature, pred, args):
     return final_text
 
 def get_valid_prelim_predictions(start_indices, end_indices, feature, result, args):
-    
+
     _PrelimPrediction = collections.namedtuple(
         "PrelimPrediction",
         ["start_index", "end_index", "start_logit", "end_logit"])
@@ -701,7 +701,7 @@ def _compute_softmax(scores):
 from apex.multi_tensor_apply import multi_tensor_applier
 class GradientClipper:
     """
-    Clips gradient norm of an iterable of parameters. 
+    Clips gradient norm of an iterable of parameters.
     """
     def __init__(self, max_grad_norm):
         self.max_norm = max_grad_norm
@@ -853,7 +853,7 @@ def main():
     args.world_size = int(os.environ.get('OMPI_COMM_WORLD_SIZE', 0))
     args.rank = int(os.environ.get('OMPI_COMM_WORLD_RANK', 0))
     args.local_rank = int(os.environ.get('OMPI_COMM_WORLD_LOCAL_RANK', -1))
-    
+
     from distutils.util import strtobool
     args.synthetic_profile = strtobool(os.environ.get('SYNTHETIC_PROFILE', 'off'))
     if args.local_rank > 0:
@@ -879,7 +879,7 @@ def main():
                                 dllogger.StdOutBackend(verbosity=dllogger.Verbosity.VERBOSE, step_format=format_step)])
     else:
         dllogger.init(backends=[])
-        
+
     print("device: {} n_gpu: {}, distributed training: {}, 16-bits training: {}".format(
                                 device, n_gpu, bool(args.local_rank != -1), args.fp16))
 
@@ -1050,61 +1050,66 @@ def main():
         train_start = time.time()
         for epoch in range(int(args.num_train_epochs)):
             train_iter = tqdm(train_dataloader, desc="Iteration", disable=args.disable_progress_bar) if is_main_process() else train_dataloader
-            for step, batch in enumerate(train_iter):
 
-                # Terminate early for benchmarking
-                
-                if args.max_steps > 0 and global_step >= args.max_steps:
-                    break
+            with torch.profiler.profile(schedule=torch.profiler.schedule(wait=100, warmup=20, active=1, repeat=1),
+                    on_trace_ready=torch.profiler.tensorboard_trace_handler('./results'), record_shapes=False, profile_memory=False, with_stack=False) as prof:
 
-                if args.synthetic_profile:
-                    print(f'SYNTHETIC ITERATION PROFILE {time.time_ns()//1000}')
+                for step, batch in enumerate(train_iter):
 
-                if n_gpu == 1:
-                    batch = tuple(t.to(device) for t in batch)  # multi-gpu does scattering it-self
-                input_ids, input_mask, segment_ids, start_positions, end_positions = batch
-                step_time = time.time_ns()
-                start_logits, end_logits = model(input_ids, segment_ids, input_mask)
-                # If we are on multi-GPU, split add a dimension
-                if len(start_positions.size()) > 1:
-                    start_positions = start_positions.squeeze(-1)
-                if len(end_positions.size()) > 1:
-                    end_positions = end_positions.squeeze(-1)
-                # sometimes the start/end positions are outside our model inputs, we ignore these terms
-                ignored_index = start_logits.size(1)
-                start_positions.clamp_(0, ignored_index)
-                end_positions.clamp_(0, ignored_index)
+                    # Terminate early for benchmarking
 
-                loss_fct = torch.nn.CrossEntropyLoss(ignore_index=ignored_index)
-                start_loss = loss_fct(start_logits, start_positions)
-                end_loss = loss_fct(end_logits, end_positions)
-                loss = (start_loss + end_loss) / 2
-                if n_gpu > 1:
-                    loss = loss.mean()  # mean() to average on multi-gpu.
-                if args.gradient_accumulation_steps > 1:
-                    loss = loss / args.gradient_accumulation_steps
-                if args.fp16:
-                    with amp.scale_loss(loss, optimizer) as scaled_loss:
-                        scaled_loss.backward()
-                else:
-                    loss.backward()
-                
-                # gradient clipping  
-                gradClipper.step(amp.master_params(optimizer))         
- 
-                if (step + 1) % args.gradient_accumulation_steps == 0:
-                    if args.fp16 :
-                        # modify learning rate with special warm up for BERT which FusedAdam doesn't do
-                        scheduler.step()
-                    optimizer.step()
-                    optimizer.zero_grad()
-                    global_step += 1
+                    if args.max_steps > 0 and global_step >= args.max_steps:
+                        break
 
-                final_loss = loss.item()
-                if step % args.log_freq == 0:
-                    dllogger.log(step=(epoch, global_step,), data={"step_loss": final_loss,
-                                                                   "learning_rate": optimizer.param_groups[0]['lr'],
-                                                                   "step_time_ns": time.time_ns()-step_time})
+                    if args.synthetic_profile:
+                        print(f'SYNTHETIC ITERATION PROFILE {time.time_ns()//1000}')
+
+                    if n_gpu == 1:
+                        batch = tuple(t.to(device) for t in batch)  # multi-gpu does scattering it-self
+                    input_ids, input_mask, segment_ids, start_positions, end_positions = batch
+                    step_time = time.time_ns()
+                    start_logits, end_logits = model(input_ids, segment_ids, input_mask)
+                    # If we are on multi-GPU, split add a dimension
+                    if len(start_positions.size()) > 1:
+                        start_positions = start_positions.squeeze(-1)
+                    if len(end_positions.size()) > 1:
+                        end_positions = end_positions.squeeze(-1)
+                    # sometimes the start/end positions are outside our model inputs, we ignore these terms
+                    ignored_index = start_logits.size(1)
+                    start_positions.clamp_(0, ignored_index)
+                    end_positions.clamp_(0, ignored_index)
+
+                    loss_fct = torch.nn.CrossEntropyLoss(ignore_index=ignored_index)
+                    start_loss = loss_fct(start_logits, start_positions)
+                    end_loss = loss_fct(end_logits, end_positions)
+                    loss = (start_loss + end_loss) / 2
+                    if n_gpu > 1:
+                        loss = loss.mean()  # mean() to average on multi-gpu.
+                    if args.gradient_accumulation_steps > 1:
+                        loss = loss / args.gradient_accumulation_steps
+                    if args.fp16:
+                        with amp.scale_loss(loss, optimizer) as scaled_loss:
+                            scaled_loss.backward()
+                    else:
+                        loss.backward()
+
+                    # gradient clipping
+                    gradClipper.step(amp.master_params(optimizer))
+
+                    if (step + 1) % args.gradient_accumulation_steps == 0:
+                        if args.fp16 :
+                            # modify learning rate with special warm up for BERT which FusedAdam doesn't do
+                            scheduler.step()
+                        optimizer.step()
+                        optimizer.zero_grad()
+                        global_step += 1
+
+                    final_loss = loss.item()
+                    if step % args.log_freq == 0:
+                        dllogger.log(step=(epoch, global_step,), data={"step_loss": final_loss,
+                                                                       "learning_rate": optimizer.param_groups[0]['lr'],
+                                                                       "step_time_ns": time.time_ns()-step_time})
+                    prof.step()
 
         time_to_train = time.time() - train_start
 
