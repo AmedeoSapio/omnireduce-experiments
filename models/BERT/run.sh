@@ -17,7 +17,7 @@
 
 echo "Container nvidia build = " $NVIDIA_BUILD_ID
 nccl_ib_disable=0
-BACKEND="gloo"
+BACKEND="nccl"
 INIT="tcp://127.0.0.1:4444"
 
 while (( "$#" )); do
@@ -40,8 +40,8 @@ done
 
 epochs="1.0"
 init_checkpoint="./dataset/checkpoint/bert_large_qa.pt"
-learning_rate="3e-5"
-precision="fp32"
+learning_rate="3.5e-5"
+precision="fp16"
 num_gpu="1"
 seed="1"
 squad_dir="./dataset/squad/v1.1"
@@ -50,7 +50,7 @@ OUT_DIR="."
 mode="train"
 CONFIG_FILE="./dataset/checkpoint/bert_config.json"
 max_steps="200"
-batch_size="4"
+batch_size="16"
 
 
 echo "out dir is $OUT_DIR"
