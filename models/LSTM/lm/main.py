@@ -197,58 +197,63 @@ def train():
 
     start_time = time.time()
     hidden = net.init_hidden(args.batch_size*args.scale)
-    for batch, item in enumerate(train_loader):
-        net.train()
-        data, targets, word_cnt, batch_len = get_batch(item)
 
-        # Starting each batch, we detach the hidden state from how it was previously produced.
-        # If we didn't, the model would try backpropagating all the way to start of the dataset.
-        hidden = repackage_hidden(hidden)
-        optimizer.zero_grad()
+    with torch.profiler.profile(schedule=torch.profiler.schedule(wait=100, warmup=20, active=1, repeat=1),
+                    on_trace_ready=torch.profiler.tensorboard_trace_handler('./results'), record_shapes=False, profile_memory=False, with_stack=False) as prof:
 
-        # Network
-        # RNN Hidden => GPU 0
-        # embedding, softmax => GPU 1
-        emb = encoder(data)
-        output, hidden = net(emb, hidden)
-        logits, new_targets = ss(output, targets)
+        for batch, item in enumerate(train_loader):
+            net.train()
+            data, targets, word_cnt, batch_len = get_batch(item)
 
-        loss = criterion(logits.view(-1, nsampled+1), new_targets)
-        loss.backward()
+            # Starting each batch, we detach the hidden state from how it was previously produced.
+            # If we didn't, the model would try backpropagating all the way to start of the dataset.
+            hidden = repackage_hidden(hidden)
+            optimizer.zero_grad()
+
+            # Network
+            # RNN Hidden => GPU 0
+            # embedding, softmax => GPU 1
+            emb = encoder(data)
+            output, hidden = net(emb, hidden)
+            logits, new_targets = ss(output, targets)
+
+            loss = criterion(logits.view(-1, nsampled+1), new_targets)
+            loss.backward()
 
 
-        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm_(net.parameters(), args.clip)
-        torch.nn.utils.clip_grad_norm_(encoder.parameters(), args.clip)
-        torch.nn.utils.clip_grad_norm_(ss.parameters(), args.clip)
-        #if args.proj:
-        #    torch.nn.utils.clip_grad_norm_(net.proj.parameters(), args.clip)
+            # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
+            torch.nn.utils.clip_grad_norm_(net.parameters(), args.clip)
+            torch.nn.utils.clip_grad_norm_(encoder.parameters(), args.clip)
+            torch.nn.utils.clip_grad_norm_(ss.parameters(), args.clip)
+            #if args.proj:
+            #    torch.nn.utils.clip_grad_norm_(net.proj.parameters(), args.clip)
 
-        for name, p in net.named_parameters():
-            if p.requires_grad:
-                grad = p.grad
-                if 'sparse' in str(grad.layout):
-                    nnz = grad._nnz()
-                else:
-                    nnz = grad.flatten().nonzero().numel()
-                n = grad.numel()
-                #print('sparse' if 'sparse' in str(grad.layout) else 'dense', name, nnz, n, nnz/n)
+            for name, p in net.named_parameters():
+                if p.requires_grad:
+                    grad = p.grad
+                    if 'sparse' in str(grad.layout):
+                        nnz = grad._nnz()
+                    else:
+                        nnz = grad.flatten().nonzero().numel()
+                    n = grad.numel()
+                    #print('sparse' if 'sparse' in str(grad.layout) else 'dense', name, nnz, n, nnz/n)
 
-        optimizer.step()
-        scheduler.step()
+            optimizer.step()
+            scheduler.step()
 
-        total_loss += word_cnt * loss.data
-        total_word_count += word_cnt
+            total_loss += word_cnt * loss.data
+            total_word_count += word_cnt
 
-        interval = 1
-        if (batch % interval) == 0:
-            elapsed = time.time() - start_time
-            print('Epoch: {:3d} | {:5d}/{:5d} batches | lr {:.6f} | ms/batch {:5.2f} | loss {:5.2f} | ppl {:8.2f}'
-                  .format(epoch, batch, batch_len, scheduler.lr, elapsed * 1000 / interval, loss.item(), math.exp(loss.item())))
-            start_time = time.time()
-            sys.stdout.flush()
-        #if (batch+1)/10>=1:
-        #    break
+            interval = 1
+            if (batch % interval) == 0:
+                elapsed = time.time() - start_time
+                print('Epoch: {:3d} | {:5d}/{:5d} batches | lr {:.6f} | ms/batch {:5.2f} | loss {:5.2f} | ppl {:8.2f}'
+                      .format(epoch, batch, batch_len, scheduler.lr, elapsed * 1000 / interval, loss.item(), math.exp(loss.item())))
+                start_time = time.time()
+                sys.stdout.flush()
+            #if (batch+1)/10>=1:
+            #    break
+            prof.step()
 
 # Load the saved model.
 if args.save and os.path.isfile(args.save):
