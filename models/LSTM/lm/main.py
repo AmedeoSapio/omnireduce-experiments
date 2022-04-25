@@ -81,7 +81,7 @@ parser.add_argument('--init', type=str,  default='127.0.0.1:4000',
                     help='DDP init')
 args = parser.parse_args()
 
-world_size, rank, local_rank = init_dist(backend=args.backend, shared_path=args.shared_path, init=args.init)
+world_size, rank, local_rank = init_dist(backend=args.backend, shared_path=args.shared_path, init=args.init, set_cuda_visible_devices=True)
 
 # Set the random seed manually for reproducibility.
 #torch.manual_seed(args.seed)
@@ -198,7 +198,7 @@ def train():
     start_time = time.time()
     hidden = net.init_hidden(args.batch_size*args.scale)
 
-    with torch.profiler.profile(schedule=torch.profiler.schedule(wait=100, warmup=20, active=1, repeat=1),
+    with torch.profiler.profile(schedule=torch.profiler.schedule(wait=70, warmup=20, active=1, repeat=1),
                     on_trace_ready=torch.profiler.tensorboard_trace_handler('./results'), record_shapes=False, profile_memory=False, with_stack=False) as prof:
 
         for batch, item in enumerate(train_loader):
